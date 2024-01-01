@@ -2,7 +2,7 @@ import yt_dlp
 import json
 from concurrent.futures import ThreadPoolExecutor
 from login import analisemacrosession, selected_course, BeautifulSoup
-from utils import create_folder, re, os, clear_folder_name, shorten_folder_name, generate_file_name, add_link_to_file, log_error, SilentLogger
+from utils import clean_user_data, create_folder, os, clear_folder_name, shorten_folder_name, generate_file_name, add_link_to_file, log_error, SilentLogger
 from pagination import pagination
 from tqdm import tqdm
 
@@ -49,6 +49,7 @@ def extract_lesson_details(lesson, index, main_course_folder):
 
 def get_avaliation_test(soup, lesson_folder):
   avaliation_tests = soup.find_all('a', class_='ld-table-list-item-preview ld-topic-row ld-primary-color-hover')
+
   for avaliation_test in avaliation_tests:
     test_title_tag = avaliation_test.find('div', class_='ld-item-title')
     if test_title_tag:
@@ -73,7 +74,6 @@ def process_topic_links(soup, lesson_folder, analisemacrosession):
 
   for index, link in enumerate(topic_links, start=1):
     topic_title_tag = link.find('span', class_='ld-topic-title')
-
     if topic_title_tag:
       topic_title = topic_title_tag.text.strip()
       topic_href = link.get('href')
@@ -81,7 +81,6 @@ def process_topic_links(soup, lesson_folder, analisemacrosession):
       soup = BeautifulSoup(response_lesson.text, 'html.parser')
       iframe = soup.find('iframe')
       video_url = iframe['src']
-      
       if iframe and is_vimeo_iframe(iframe):
         output_path = shorten_folder_name(os.path.join(lesson_folder, 'topico', f'{index:03d} - {clear_folder_name(topic_title)}.mp4'))
         download_video(video_url, output_path)
@@ -90,25 +89,17 @@ def process_topic_links(soup, lesson_folder, analisemacrosession):
 
 
 def save_html_content(soup, lesson_folder, file_name):
-  html_content = str(soup)
-  html_content = re.sub(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', '', html_content)
-  html_content = re.sub(r'\d{3}\.\d{3}\.\d{3}-\d{2}', '', html_content)
-  html_content = re.sub(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', '', html_content)
-
+  scripts = soup.find_all('script')
+  html_content = clean_user_data(soup, scripts)
   soup = BeautifulSoup(html_content, 'html.parser')
   ld_focus_header = soup.find('div', class_='ld-focus-header')
   ld_lesson_items = soup.find('div', class_='ld-lesson-items')
-  scripts = soup.find_all('script')
 
   if ld_focus_header:
     ld_focus_header.decompose()
 
   if ld_lesson_items:
     ld_lesson_items.decompose()
-  
-  for script in scripts:
-    if script.string:
-      script.string = re.sub(r'user_id:\s*\d+\s*,', '', script.string)
 
   scripts_to_remove = soup.find_all('script', {'id': 'pys-js-extra'})
   scripts_to_remove.extend(soup.find_all('script', {'data-cfasync': 'false', 'data-pagespeed-no-defer': ''}))
@@ -190,6 +181,11 @@ def navigate_page(ld_pages):
   return data_pager_results_json
 
 
+def extract_lesson_titles(soup):
+  lesson_anchors = soup.find_all('a', class_='ld-item-name ld-primary-color-hover')
+  return [anchor.find('div', class_='ld-item-title') for anchor in lesson_anchors if anchor.find('div', class_='ld-item-title')]
+
+
 def process_lessons(course_name, lessons_titles, main_course_folder):
   total_lessons = len(lessons_titles) 
   main_progress_bar = tqdm(total=total_lessons, desc=course_name, leave=True)
@@ -214,26 +210,16 @@ def list_lessons(course_name, course_link, course_id):
   main_course_folder = create_folder(clear_folder_name(course_name))
   response = analisemacrosession.get(course_link)
   soup = BeautifulSoup(response.text, 'html.parser')
-
-  lesson_anchors = soup.find_all('a', class_='ld-item-name ld-primary-color-hover')
-  lessons_titles = []
+  lessons_titles = extract_lesson_titles(soup)
   ld_pages = soup.find('div', class_='ld-pagination ld-pagination-page-course_content_shortcode')
 
   if ld_pages:
     data_json = navigate_page(ld_pages)
     additional_html = pagination(data_json, course_id)
     additional_soup = BeautifulSoup(additional_html, 'html.parser')
-    lesson_anchors = additional_soup.find_all('a', class_='ld-item-name ld-primary-color-hover')
-    for anchor in lesson_anchors:
-      lesson_title = anchor.find('div', class_='ld-item-title')
-      if lesson_title:
-        lessons_titles.append(lesson_title)
+    lessons_titles = extract_lesson_titles(additional_soup)
     return process_lessons(course_name, lessons_titles, main_course_folder)
 
-  for anchor in lesson_anchors:
-    lesson_title = anchor.find('div', class_='ld-item-title')
-    if lesson_title:
-      lessons_titles.append(lesson_title)
   return process_lessons(course_name, lessons_titles, main_course_folder)
 
 

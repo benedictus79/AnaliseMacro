@@ -70,6 +70,19 @@ def generate_file_name(url, content_type):
   return default_name + extension
 
 
+def clean_user_data(page, scripts):
+  html_content = str(page)
+  html_content = re.sub(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', '', html_content)
+  html_content = re.sub(r'\d{3}\.\d{3}\.\d{3}-\d{2}', '', html_content)
+  html_content = re.sub(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', '', html_content)
+
+  for script in scripts:
+    if script.string:
+      script.string = re.sub(r'user_id:\s*\d+\s*,', '', script.string)
+
+  return html_content
+
+
 def add_link_to_file(link, lesson_folder, index):
   file_path = create_folder(os.path.join(lesson_folder, 'material'))
   with open(os.path.join(file_path, f'{index:03d} - links.txt'), 'a') as file:
